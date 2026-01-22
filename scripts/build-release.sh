@@ -46,6 +46,10 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Claude Usage Widget needs calendar access to add reset time reminders.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Claude Usage Widget needs calendar access to add reset time reminders.</string>
 </dict>
 </plist>
 EOF
