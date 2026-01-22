@@ -7,37 +7,46 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Swift
-      uses: swift-actions/setup-swift@v2
-      with:
-        swift-version: "5.9"
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '5.9'
 
-    - name: Get version from tag
-      id: version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-    - name: Build Release
-      run: |
-        chmod +x scripts/build-release.sh
-        ./scripts/build-release.sh ${{ steps.version.outputs.VERSION }}
+      - name: Build release
+        run: |
+          chmod +x ./scripts/build-release.sh
+          ./scripts/build-release.sh ${{ steps.version.outputs.VERSION }}
 
-    - name: Upload DMG artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ClaudeUsageWidget-${{ steps.version.outputs.VERSION }}
-        path: .build/release/*.dmg
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: .build/release/ClaudeUsageWidget-${{ steps.version.outputs.VERSION }}.dmg
+          body: |
+            ## Installation
 
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: .build/release/*.dmg
-        draft: false
-        prerelease: false
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            1. Download the DMG file
+            2. Open DMG and drag app to Applications
+            3. Run in Terminal (required for unsigned apps):
+               ```bash
+               xattr -cr /Applications/ClaudeUsageWidget.app
+               ```
+            4. Open the app
+
+            ## Requirements
+
+            - macOS 13.0+
+            - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and logged in
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
