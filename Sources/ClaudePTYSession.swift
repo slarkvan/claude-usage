@@ -18,6 +18,8 @@ class ClaudePTYSession {
     private var statusTimeout: DispatchWorkItem?
     private var logFileHandle: FileHandle?
     private var isReady = false
+    private var retryCount = 0
+    private let maxRetries = 3
 
     var onStatusUpdate: ((UsageData) -> Void)?
     var onError: ((String) -> Void)?
@@ -260,10 +262,41 @@ class ClaudePTYSession {
         }
 
         if isWaitingForStatus {
-            // Check for "forbidden" error and retry
+            // Check for "forbidden" error and retry (with limit)
             if outputBuffer.contains("forbidden") || outputBuffer.contains("Request not allowed") {
-                log("Detected forbidden error, sending 'r' to retry...")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                retryCount += 1
+                log("Detected forbidden error (retry \(retryCount)/\(maxRetries))...")
+
+                if retryCount >= maxRetries {
+                    log("Max retries reached, giving up")
+                    isWaitingForStatus = false
+                    statusTimeout?.cancel()
+                    statusTimeout = nil
+                    retryCount = 0
+                    outputBuffer = ""
+                    onError?("API rate limited - please try again later")
+                    return
+                }
+
+                // Reset timeout for retry
+                statusTimeout?.cancel()
+                let timeout = DispatchWorkItem { [weak self] in
+                    guard let self = self, self.isWaitingForStatus else { return }
+                    self.isWaitingForStatus = false
+                    self.retryCount = 0
+                    self.log("Status timeout after retry. Buffer: \(self.outputBuffer.debugDescription)")
+                    if let data = StatusParser.parse(self.outputBuffer) {
+                        self.log("Timeout parse succeeded")
+                        self.onStatusUpdate?(data)
+                    } else {
+                        self.onError?("Status timeout - no data parsed")
+                    }
+                    self.outputBuffer = ""
+                }
+                statusTimeout = timeout
+                DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: timeout)
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                     self?.sendInput("r")  // Press 'r' to retry
                 }
                 outputBuffer = ""  // Clear buffer for retry
@@ -315,6 +348,9 @@ class ClaudePTYSession {
             log("sendStatus called but session not ready")
             return
         }
+
+        // Reset retry counter for new status request
+        retryCount = 0
 
         log("Sending /status command...")
         isWaitingForStatus = true
