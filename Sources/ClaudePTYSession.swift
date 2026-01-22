@@ -203,15 +203,45 @@ class ClaudePTYSession {
     }
 
     private func findClaudePath() -> String? {
-        // Use login shell to run 'which claude' - this loads user's PATH from ~/.zshrc etc.
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        // Method 1: Scan nvm directory for any node version with claude
+        let nvmDir = "\(NSHomeDirectory())/.nvm/versions/node"
+        if let nodeVersions = try? FileManager.default.contentsOfDirectory(atPath: nvmDir) {
+            let sortedVersions = nodeVersions.sorted().reversed()
+            for version in sortedVersions {
+                let claudePath = "\(nvmDir)/\(version)/bin/claude"
+                if FileManager.default.fileExists(atPath: claudePath) {
+                    return claudePath
+                }
+            }
+        }
+
+        // Method 2: Common installation paths
+        let paths = [
+            "/usr/local/bin/claude",
+            "/opt/homebrew/bin/claude",
+            "\(NSHomeDirectory())/.local/bin/claude",
+            "\(NSHomeDirectory())/.npm-global/bin/claude",
+            "\(NSHomeDirectory())/.claude/local/bin/claude"
+        ]
+
+        for path in paths {
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+
+        // Method 3: Use interactive login shell to run 'which claude'
         let whichProcess = Process()
         let whichPipe = Pipe()
-        whichProcess.executableURL = URL(fileURLWithPath: shell)
-        whichProcess.arguments = ["-l", "-c", "which claude"]
+        whichProcess.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        whichProcess.arguments = ["-l", "-i", "-c", "which claude"]
         whichProcess.standardOutput = whichPipe
         whichProcess.standardError = FileHandle.nullDevice
         whichProcess.standardInput = FileHandle.nullDevice
+        whichProcess.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+        var env = whichProcess.environment ?? [:]
+        env["HOME"] = NSHomeDirectory()
+        whichProcess.environment = env
 
         do {
             try whichProcess.run()
@@ -223,20 +253,6 @@ class ClaudePTYSession {
             }
         } catch {
             // Ignore
-        }
-
-        // Fallback: common installation paths
-        let paths = [
-            "/usr/local/bin/claude",
-            "/opt/homebrew/bin/claude",
-            "\(NSHomeDirectory())/.local/bin/claude",
-            "\(NSHomeDirectory())/.npm-global/bin/claude"
-        ]
-
-        for path in paths {
-            if FileManager.default.fileExists(atPath: path) {
-                return path
-            }
         }
 
         return nil
