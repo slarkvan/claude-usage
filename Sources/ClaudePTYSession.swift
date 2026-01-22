@@ -203,20 +203,29 @@ class ClaudePTYSession {
     }
 
     private func findClaudePath() -> String? {
-        // Check nvm versions directory for any node version
-        let nvmDir = "\(NSHomeDirectory())/.nvm/versions/node"
-        if let nodeVersions = try? FileManager.default.contentsOfDirectory(atPath: nvmDir) {
-            // Sort versions descending to prefer newer versions
-            let sortedVersions = nodeVersions.sorted().reversed()
-            for version in sortedVersions {
-                let claudePath = "\(nvmDir)/\(version)/bin/claude"
-                if FileManager.default.fileExists(atPath: claudePath) {
-                    return claudePath
-                }
+        // Use login shell to run 'which claude' - this loads user's PATH from ~/.zshrc etc.
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let whichProcess = Process()
+        let whichPipe = Pipe()
+        whichProcess.executableURL = URL(fileURLWithPath: shell)
+        whichProcess.arguments = ["-l", "-c", "which claude"]
+        whichProcess.standardOutput = whichPipe
+        whichProcess.standardError = FileHandle.nullDevice
+        whichProcess.standardInput = FileHandle.nullDevice
+
+        do {
+            try whichProcess.run()
+            whichProcess.waitUntilExit()
+            let data = whichPipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !output.isEmpty, FileManager.default.fileExists(atPath: output) {
+                return output
             }
+        } catch {
+            // Ignore
         }
 
-        // Common installation paths
+        // Fallback: common installation paths
         let paths = [
             "/usr/local/bin/claude",
             "/opt/homebrew/bin/claude",
@@ -228,26 +237,6 @@ class ClaudePTYSession {
             if FileManager.default.fileExists(atPath: path) {
                 return path
             }
-        }
-
-        // Try which command
-        let whichProcess = Process()
-        let whichPipe = Pipe()
-        whichProcess.executableURL = URL(fileURLWithPath: "/bin/sh")
-        whichProcess.arguments = ["-c", "which claude"]
-        whichProcess.standardOutput = whichPipe
-        whichProcess.standardError = FileHandle.nullDevice
-
-        do {
-            try whichProcess.run()
-            whichProcess.waitUntilExit()
-            let data = whichPipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !output.isEmpty {
-                return output
-            }
-        } catch {
-            // Ignore
         }
 
         return nil
