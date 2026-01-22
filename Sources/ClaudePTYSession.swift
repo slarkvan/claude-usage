@@ -203,9 +203,21 @@ class ClaudePTYSession {
     }
 
     private func findClaudePath() -> String? {
+        // Check nvm versions directory for any node version
+        let nvmDir = "\(NSHomeDirectory())/.nvm/versions/node"
+        if let nodeVersions = try? FileManager.default.contentsOfDirectory(atPath: nvmDir) {
+            // Sort versions descending to prefer newer versions
+            let sortedVersions = nodeVersions.sorted().reversed()
+            for version in sortedVersions {
+                let claudePath = "\(nvmDir)/\(version)/bin/claude"
+                if FileManager.default.fileExists(atPath: claudePath) {
+                    return claudePath
+                }
+            }
+        }
+
         // Common installation paths
         let paths = [
-            "\(NSHomeDirectory())/.nvm/versions/node/v22.18.0/bin/claude",
             "/usr/local/bin/claude",
             "/opt/homebrew/bin/claude",
             "\(NSHomeDirectory())/.local/bin/claude",
