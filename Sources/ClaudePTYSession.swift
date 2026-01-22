@@ -160,7 +160,7 @@ class ClaudePTYSession {
         envProcess.executableURL = URL(fileURLWithPath: shell)
         // Use -l for login shell to load .zprofile/.zshrc
         // Avoid -i (interactive) as it can hang waiting for input
-        envProcess.arguments = ["-l", "-c", "env"]
+        envProcess.arguments = ["-l", "-i", "-c", "env"]
         envProcess.standardOutput = pipe
         envProcess.standardError = FileHandle.nullDevice
         envProcess.standardInput = FileHandle.nullDevice  // Prevent waiting for input
