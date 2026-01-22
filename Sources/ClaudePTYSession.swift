@@ -68,11 +68,11 @@ class ClaudePTYSession {
             process?.executableURL = URL(fileURLWithPath: unbufferPath)
             process?.arguments = ["-p", path]
         } else {
-            log("Using script for PTY")
-            // Use script with -q (quiet) and write to /dev/null
-            // The key is to use script in a way that allows stdin passthrough
-            process?.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process?.arguments = ["-c", "script -q /dev/null \(path)"]
+            log("Using script for PTY (macOS native)")
+            // macOS script command syntax: script -q outputfile command
+            // Using /dev/null as output file and passing command directly
+            process?.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+            process?.arguments = ["-q", "/dev/null", path]
         }
 
         process?.standardInput = inputPipe
@@ -122,14 +122,15 @@ class ClaudePTYSession {
             log("Process started")
 
             // Auto-confirm the "trust folder" dialog
-            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { [weak self] in
+            // Wait for the dialog to fully render before sending Enter
+            DispatchQueue.global().asyncAfter(deadline: .now() + 4) { [weak self] in
                 guard let self = self else { return }
                 self.log("Sending Enter to confirm trust dialog...")
                 self.sendInput("\r")  // Use \r for Enter in terminal
             }
 
             // Fallback: Mark as ready after startup if not detected earlier
-            DispatchQueue.global().asyncAfter(deadline: .now() + 10) { [weak self] in
+            DispatchQueue.global().asyncAfter(deadline: .now() + 15) { [weak self] in
                 guard let self = self, !self.isReady else { return }
                 self.isReady = true
                 self.log("Session marked as ready (fallback timer)")
@@ -155,16 +156,31 @@ class ClaudePTYSession {
         let pipe = Pipe()
 
         envProcess.executableURL = URL(fileURLWithPath: shell)
-        // Source profile and print environment
-        // Use -i for interactive shell to load .zshrc (where proxy settings often are)
-        envProcess.arguments = ["-l", "-i", "-c", "env"]
+        // Use -l for login shell to load .zprofile/.zshrc
+        // Avoid -i (interactive) as it can hang waiting for input
+        envProcess.arguments = ["-l", "-c", "env"]
         envProcess.standardOutput = pipe
         envProcess.standardError = FileHandle.nullDevice
+        envProcess.standardInput = FileHandle.nullDevice  // Prevent waiting for input
         envProcess.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
 
         do {
             try envProcess.run()
-            envProcess.waitUntilExit()
+
+            // Add timeout to prevent hanging
+            let deadline = DispatchTime.now() + .seconds(5)
+            let result = DispatchSemaphore(value: 0)
+
+            DispatchQueue.global().async {
+                envProcess.waitUntilExit()
+                result.signal()
+            }
+
+            if result.wait(timeout: deadline) == .timedOut {
+                envProcess.terminate()
+                log("Shell environment loading timed out")
+                return nil
+            }
 
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             guard let output = String(data: data, encoding: .utf8) else { return nil }
@@ -229,14 +245,17 @@ class ClaudePTYSession {
         log("RAW OUTPUT: \(text.debugDescription)")
 
         // Check for ready indicators - look for the main prompt after trust dialog
-        // The prompt shows "❯" or "Try" or "? for shortcuts" after login
-        // DON'T trigger on the trust dialog "Do you want to work in this folder?"
-        let isTrustDialog = outputBuffer.contains("Do you want to work in this folder")
-        let hasMainPrompt = text.contains("? for shortcuts") || text.contains("Try \"") || (text.contains("❯") && !isTrustDialog)
+        // The prompt shows "Welcome back" after the trust dialog is confirmed
+        // Also look for "? for shortcuts" which appears at the bottom of the main UI
+        let hasWelcome = text.contains("Welcome back") || outputBuffer.contains("Welcome back")
+        let hasShortcuts = text.contains("? for shortcuts")
+        let hasMainPrompt = hasWelcome || hasShortcuts
 
-        if !isReady && hasMainPrompt && !isTrustDialog {
+        if !isReady && hasMainPrompt {
             isReady = true
             log("Session became ready (detected main prompt)")
+            // Clear the buffer since we're past the trust dialog
+            outputBuffer = ""
             onReady?()
         }
 
@@ -326,21 +345,22 @@ class ClaudePTYSession {
         // Send /status command
         // Type /status, press Tab to autocomplete, then Enter to execute
         sendInput("/status")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.sendInput("\t")  // Tab to accept autocomplete
             self?.log("Sent Tab for autocomplete")
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) { [weak self] in
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.sendInput("\r")  // Enter to execute
             self?.log("Sent Enter to execute")
         }
         // Navigate to Usage tab (right arrow twice: Status -> Config -> Usage)
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.2) { [weak self] in
+        // Wait longer for the status dialog to appear
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2.5) { [weak self] in
             // Right arrow: ESC [ C
             self?.sendInput("\u{1B}[C")  // First right arrow
             self?.log("Sent Right arrow 1")
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { [weak self] in
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3.0) { [weak self] in
             self?.sendInput("\u{1B}[C")  // Second right arrow
             self?.log("Sent Right arrow 2")
         }
