@@ -141,8 +141,17 @@ class StatusBarController {
     }
 
     private func startRefreshTimer() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        // 使用 Timer 构造器而非 scheduledTimer，以便手动添加到 RunLoop
+        refreshTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.requestStatus()
+        }
+
+        // 设置 tolerance 为 0，禁用系统的定时器合并优化，确保精确触发
+        refreshTimer?.tolerance = 0
+
+        // 添加到 .common 模式，确保在用户交互（菜单展开、拖拽等）时也能触发
+        if let timer = refreshTimer {
+            RunLoop.main.add(timer, forMode: .common)
         }
     }
 
