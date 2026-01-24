@@ -31,7 +31,7 @@ A macOS menu bar widget that displays your Claude Code usage in real-time.
 2. Open DMG and drag app to Applications folder
 3. Run the following command in Terminal (required for unsigned apps):
    ```bash
-   xattr -cr /Applications/ClaudeUsageWidget.app
+   find /Applications/ClaudeUsageWidget.app -exec xattr -c {} \;
    ```
 4. Open the app from Applications
 
@@ -84,7 +84,7 @@ If you use a proxy (e.g., Clash), the widget will automatically load proxy setti
 
 Run the xattr command to remove quarantine:
 ```bash
-xattr -cr /Applications/ClaudeUsageWidget.app
+find /Applications/ClaudeUsageWidget.app -exec xattr -c {} \;
 ```
 
 ### Proxy not working
