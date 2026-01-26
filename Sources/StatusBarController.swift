@@ -4,7 +4,7 @@ import EventKit
 class StatusBarController {
     private var statusItem: NSStatusItem!
     private var claudeSession: ClaudePTYSession?
-    private var refreshTimer: Timer?
+    private var dispatchTimer: DispatchSourceTimer?
     private var usageData: UsageData?
     private var isConnecting = false
 
@@ -141,18 +141,29 @@ class StatusBarController {
     }
 
     private func startRefreshTimer() {
-        // 使用 Timer 构造器而非 scheduledTimer，以便手动添加到 RunLoop
-        refreshTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+        // 使用 DispatchSourceTimer 替代 Timer，获得内核级精度
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
+
+        // 计算下一个整分钟的时间点
+        let now = Date()
+        let calendar = Calendar.current
+        let seconds = calendar.component(.second, from: now)
+        let delayToNextMinute = Double(60 - seconds)
+
+        // 使用 wallDeadline 确保系统睡眠唤醒后能基于墙上时钟正确恢复
+        // leeway: .never 禁用系统的定时器合并优化，确保精确触发
+        timer.schedule(
+            wallDeadline: .now() + delayToNextMinute,
+            repeating: 60.0,
+            leeway: .never
+        )
+
+        timer.setEventHandler { [weak self] in
             self?.requestStatus()
         }
 
-        // 设置 tolerance 为 0，禁用系统的定时器合并优化，确保精确触发
-        refreshTimer?.tolerance = 0
-
-        // 添加到 .common 模式，确保在用户交互（菜单展开、拖拽等）时也能触发
-        if let timer = refreshTimer {
-            RunLoop.main.add(timer, forMode: .common)
-        }
+        timer.resume()
+        dispatchTimer = timer
     }
 
     private func requestStatus() {
@@ -453,8 +464,8 @@ class StatusBarController {
     }
 
     func cleanup() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
+        dispatchTimer?.cancel()
+        dispatchTimer = nil
         claudeSession?.stop()
         claudeSession = nil
     }
